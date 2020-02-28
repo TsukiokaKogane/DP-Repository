@@ -36,10 +36,12 @@ def permanent_randomized_response(b, d, f):
 def instantaneous_randomized_response(b, d, p, q):
     for i in range(d):
         r = random.uniform(0, 1)
-        if r < p:
-            b[i] = 0
-        else:
+        if b[i] == 1 and r < p:
             b[i] = 1
+        elif b[i] == 0 and r < q:
+            b[i] = 1
+        else:
+            b[i] = 0
     return b
 
 
@@ -66,4 +68,22 @@ def test(d, f, n):
     for i in aggregation(b, d, f, n):
         print(i)
 
-test(2, 0.5, 1000000)
+def test1(d, f, n):
+    b = []
+    for i in range(d):
+        b.append(0)
+
+    for i in range(int(n/2)):
+        b1 = perturbation(encode(0, d), d, f)
+        for j in range(d):
+            b[j] = b[j] + b1[j]
+
+    for i in range(int(n/2)):
+        b1 = perturbation(encode(1, d), d, f)
+        for j in range(d):
+            b[j] = b[j] + b1[j]
+
+    for i in aggregation(b, d, f, n):
+        print(i)
+
+test1(2, 0.5, 1000000)
