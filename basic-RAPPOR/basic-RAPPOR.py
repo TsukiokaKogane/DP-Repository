@@ -1,5 +1,8 @@
-import random
+"""
+The basic version of RAPPOR mechanism for local differential privacy.
 
+"""
+import random
 
 
 def encode(v, d):
