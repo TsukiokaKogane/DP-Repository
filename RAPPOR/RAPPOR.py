@@ -2,7 +2,9 @@
 The RAPPOR mechanism for local differential privacy.
 
 """
-import random
+from random import SystemRandom
+import hashlib
+import struct
 
 
 class Params(object):
@@ -24,6 +26,48 @@ class Params(object):
 
     def __repr__(self):
         return repr(self.__dict__)
+
+
+class _SecureRandom(object):
+    """
+     Returns an integer where each bit has probability p of being 1.
+    """
+    def __init__(self, prob_one, num_bits):
+        self.prob_one = prob_one
+        self.num_bits = num_bits
+
+    def __call__(self):
+        p = self.prob_one
+        rand = SystemRandom()
+        r = 0
+        for i in range(self.num_bits):
+            bit = rand.random() < p
+            r |= (bit << i)  # using bool as int
+        return r
+
+
+class SecureIrrRand(object):
+    """
+    Python's os.random()
+    """
+
+    def __init__(self, params):
+        """
+        Parameters
+        params: rappor.Params
+        """
+        num_bits = params.num_bloombits
+        # IRR probabilities
+        self.p_gen = _SecureRandom(params.prob_p, num_bits)
+        self.q_gen = _SecureRandom(params.prob_q, num_bits)
+
+
+def to_big_endian(i):
+    """Convert an integer to a 4 byte big endian string.  Used for hashing."""
+    # https://docs.python.org/3/library/struct.html
+    # - Big Endian (>) for consistent network byte order.
+    # - L means 4 bytes when using >
+    return struct.pack('>L', i)
 
 
 def signal():
