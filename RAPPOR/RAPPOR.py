@@ -5,6 +5,7 @@ The RAPPOR mechanism for local differential privacy.
 from random import SystemRandom
 import hashlib
 import struct
+import hmac
 
 
 class Params(object):
@@ -56,6 +57,7 @@ class SecureIrrRand(object):
         Parameters
         params: rappor.Params
         """
+        # TODO: fix annotation
         num_bits = params.num_bloombits
         # IRR probabilities
         self.p_gen = _SecureRandom(params.prob_p, num_bits)
@@ -63,70 +65,248 @@ class SecureIrrRand(object):
 
 
 def to_big_endian(i):
-    """Convert an integer to a 4 byte big endian string.  Used for hashing."""
+    """
+    Convert an integer to a 4 byte big endian string.  Used for hashing.
+    """
     # https://docs.python.org/3/library/struct.html
     # - Big Endian (>) for consistent network byte order.
     # - L means 4 bytes when using >
     return struct.pack('>L', i)
 
 
-def signal():
+def bit_string(irr, num_bloombits):
     """
-    Hash client's value v onto the Bloom filter B of size k using h hash functions.
-
-    Parameters
-    ----------
-
-    Returns
-    -------
-
+    Like bin(), but uses leading zeroes, and no '0b'.
     """
-    pass
+    s = ''
+    bits = []
+    for bit_num in range(num_bloombits):
+        if irr & (1 << bit_num):
+            bits.append('1')
+        else:
+            bits.append('0')
+    return ''.join(reversed(bits))
 
 
-def permanent_randomized_response():
+def get_bloom_bits(word, cohort, num_hashes, num_bloombits):
     """
-    For each client's value v and bit i in B, create a binary reporting value Bi' which equals to
-    Bi' = 1 with probability  0.5f
-    Bi' = 0 with probability  0.5f
-    Bi' = Bi with probability  1 - f
-
-    Parameters
-    ----------
-
-    Returns
-    -------
-
+    Return an array of bits to set in the bloom filter.
+    In the real report, we bitwise-OR them together.  In hash candidates, we put
+    them in separate entries in the "map" matrix.
     """
-    pass
+    # TODO: fix annotation
+    value = to_big_endian(cohort) + word  # Cohort is 4 byte prefix.
+    md5 = hashlib.md5(value)
+
+    digest = md5.digest()
+
+    # Each has is a byte, which means we could have up to 256 bit Bloom filters.
+    # There are 16 bytes in an MD5, in which case we can have up to 16 hash
+    # functions per Bloom filter.
+    if num_hashes > len(digest):
+        raise RuntimeError("Can't have more than %d hashes" % md5)
+
+    # log('hash_input %r', value)
+    # log('Cohort %d', cohort)
+    # log('MD5 %s', md5.hexdigest())
+
+    # TODO: utility test
+    return [ord(digest[i]) % num_bloombits for i in range(num_hashes)]
 
 
-def instantaneous_randomized_response():
-    """
-    Allocate a bit array S of size k and initialize to 0. Set each bit i in S with probabilities
-    P(Si = q) = q if Bi' = 1
-    P(Si = q) = p if Bi' = 0
+def get_prr_masks(secret, word, prob_f, num_bits):
+    h = hmac.new(secret, word, digestmod=hashlib.sha256)
+    # log('word %s, secret %s, HMAC-SHA256 %s', word, secret, h.hexdigest())
 
-    Parameters
-    ----------
+    # Now go through each byte
+    digest_bytes = h.digest()
+    assert len(digest_bytes) == 32
 
-    Returns
-    -------
+    # Use 32 bits.  If we want 64 bits, it may be fine to generate another 32
+    # bytes by repeated HMAC.  For arbitrary numbers of bytes it's probably
+    # better to use the HMAC-DRBG algorithm.
+    if num_bits > len(digest_bytes):
+        raise RuntimeError('%d bits is more than the max of %d', num_bits, len(digest_bytes))
 
-    """
-    pass
+    threshold128 = prob_f * 128
+
+    uniform = 0
+    f_mask = 0
+
+    for i in range(num_bits):
+        ch = digest_bytes[i]
+        byte = ord(ch)
+
+        u_bit = byte & 0x01  # 1 bit of entropy
+        uniform |= (u_bit << i)  # maybe set bit in mask
+
+        rand128 = byte >> 1  # 7 bits of entropy
+        noise_bit = (rand128 < threshold128)
+        f_mask |= (noise_bit << i)  # maybe set bit in mask
+
+    return uniform, f_mask
 
 
-def report():
-    """
-    Send the generated report S to the server.
+class Encoder(object):
+    """Obfuscates values for a given user using the RAPPOR privacy algorithm."""
 
-    Parameters
-    ----------
+    def __init__(self, params, cohort, secret, irr_rand):
+        """
+        Args:
+            params: RAPPOR Params() controlling privacy
+            cohort: integer cohort, for Bloom hashing.
+            secret: secret string, for the PRR to be a deterministic function of the
+            reported value.
+            irr_rand: IRR randomness interface.
+        """
+        # RAPPOR params.  NOTE: num_cohorts isn't used.  p and q are used by
+        # irr_rand.
+        self.params = params
+        self.cohort = cohort  # associated: MD5
+        self.secret = secret  # associated: HMAC-SHA256
+        self.irr_rand = irr_rand  # p and q used
 
-    Returns
-    -------
+    def _internal_encode_bits(self, bits):
+        """
+        Helper function for simulation / testing.
+        Returns:
+            The PRR and IRR.  The PRR should never be sent over the network.
+        """
+        # Compute Permanent Randomized Response (PRR).
+        uniform, f_mask = get_prr_masks(
+         self.secret, to_big_endian(bits), self.params.prob_f,
+         self.params.num_bloombits)
 
-    """
-    pass
+        # Suppose bit i of the Bloom filter is B_i.  Then bit i of the PRR is
+        # defined as:
+        #
+        # 1   with prob f/2
+        # 0   with prob f/2
+        # B_i with prob 1-f
+
+        # Uniform bits are 1 with probability 1/2, and f_mask bits are 1 with
+        # probability f.  So in the expression below:
+        #
+        # - Bits in (uniform & f_mask) are 1 with probability f/2.
+        # - (bloom_bits & ~f_mask) clears a bloom filter bit with probability
+        # f, so we get B_i with probability 1-f.
+        # - The remaining bits are 0, with remaining probability f/2.
+
+        prr = (bits & ~f_mask) | (uniform & f_mask)
+
+        # log('U %s / F %s', bit_string(uniform, num_bits),
+        #    bit_string(f_mask, num_bits))
+
+        # log('B %s / PRR %s', bit_string(bloom_bits, num_bits),
+        #    bit_string(prr, num_bits))
+
+        # Compute Instantaneous Randomized Response (IRR).
+        # If PRR bit is 0, IRR bit is 1 with probability p.
+        # If PRR bit is 1, IRR bit is 1 with probability q.
+        p_bits = self.irr_rand.p_gen()
+        q_bits = self.irr_rand.q_gen()
+
+        irr = (p_bits & ~prr) | (q_bits & prr)
+
+        return prr, irr  # IRR is the rappor
+
+    def _internal_encode(self, word):
+        """
+        Helper function for simulation / testing.
+        Returns:
+            The Bloom filter bits, PRR, and IRR.  The first two values should never
+            be sent over the network.
+        """
+        bloom_bits = get_bloom_bits(word, self.cohort, self.params.num_hashes,
+                                self.params.num_bloombits)
+
+        bloom = 0
+        for bit_to_set in bloom_bits:
+            bloom |= (1 << bit_to_set)
+
+        prr, irr = self._internal_encode_bits(bloom)
+        return bloom, prr, irr
+
+    def encode_bits(self, bits):
+        """
+        Encode a string with RAPPOR.
+        Args:
+            bits: An integer representing bits to encode.
+        Returns:
+            An integer that is the IRR (Instantaneous Randomized Response).
+        """
+        _, irr = self._internal_encode_bits(bits)
+        return irr
+
+    def encode(self, word):
+        """
+        Encode a string with RAPPOR.
+        Args:
+            word: the string that should be privately transmitted.
+        Returns:
+            An integer that is the IRR (Instantaneous Randomized Response).
+        """
+        _, _, irr = self._internal_encode(word)
+        return irr
+
+
+# def signal():
+#     """
+#     Hash client's value v onto the Bloom filter B of size k using h hash functions.
+#
+#     Parameters
+#     ----------
+#
+#     Returns
+#     -------
+#
+#     """
+#     pass
+#
+#
+# def permanent_randomized_response():
+#     """
+#     For each client's value v and bit i in B, create a binary reporting value Bi' which equals to
+#     Bi' = 1 with probability  0.5f
+#     Bi' = 0 with probability  0.5f
+#     Bi' = Bi with probability  1 - f
+#
+#     Parameters
+#     ----------
+#
+#     Returns
+#     -------
+#
+#     """
+#     pass
+#
+#
+# def instantaneous_randomized_response():
+#     """
+#     Allocate a bit array S of size k and initialize to 0. Set each bit i in S with probabilities
+#     P(Si = q) = q if Bi' = 1
+#     P(Si = q) = p if Bi' = 0
+#
+#     Parameters
+#     ----------
+#
+#     Returns
+#     -------
+#
+#     """
+#     pass
+#
+#
+# def report():
+#     """
+#     Send the generated report S to the server.
+#
+#     Parameters
+#     ----------
+#
+#     Returns
+#     -------
+#
+#     """
+#     pass
 
