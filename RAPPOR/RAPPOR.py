@@ -6,6 +6,13 @@ from random import SystemRandom
 import hashlib
 import struct
 import hmac
+import sys
+
+
+def log(msg, *args):
+    if args:
+        msg = msg % args
+    print(msg, file=sys.stderr)
 
 
 class Params(object):
@@ -111,12 +118,13 @@ def get_bloom_bits(word, cohort, num_hashes, num_bloombits):
     # log('MD5 %s', md5.hexdigest())
 
     # TODO: utility test
-    return [ord(digest[i]) % num_bloombits for i in range(num_hashes)]
+    return [digest[i] % num_bloombits for i in range(num_hashes)]
 
 
 def get_prr_masks(secret, word, prob_f, num_bits):
-    h = hmac.new(secret, word, digestmod=hashlib.sha256)
-    # log('word %s, secret %s, HMAC-SHA256 %s', word, secret, h.hexdigest())
+    h = hmac.new(secret.encode(), word, digestmod=hashlib.sha256)
+    log('secret %s', secret.encode())
+    log('word %s, secret %s, HMAC-SHA256 %s', word, secret, h.hexdigest())
 
     # Now go through each byte
     digest_bytes = h.digest()
@@ -125,6 +133,7 @@ def get_prr_masks(secret, word, prob_f, num_bits):
     # Use 32 bits.  If we want 64 bits, it may be fine to generate another 32
     # bytes by repeated HMAC.  For arbitrary numbers of bytes it's probably
     # better to use the HMAC-DRBG algorithm.
+    log('num_bits %d max of %d',  num_bits, len(digest_bytes))
     if num_bits > len(digest_bytes):
         raise RuntimeError('%d bits is more than the max of %d', num_bits, len(digest_bytes))
 
@@ -134,8 +143,8 @@ def get_prr_masks(secret, word, prob_f, num_bits):
     f_mask = 0
 
     for i in range(num_bits):
-        ch = digest_bytes[i]
-        byte = ord(ch)
+        byte = digest_bytes[i]
+        log('%d byte %d', i, byte)
 
         u_bit = byte & 0x01  # 1 bit of entropy
         uniform |= (u_bit << i)  # maybe set bit in mask
@@ -143,7 +152,7 @@ def get_prr_masks(secret, word, prob_f, num_bits):
         rand128 = byte >> 1  # 7 bits of entropy
         noise_bit = (rand128 < threshold128)
         f_mask |= (noise_bit << i)  # maybe set bit in mask
-
+    log('uniform %s, f_mask  %s', uniform, f_mask)
     return uniform, f_mask
 
 
@@ -217,8 +226,7 @@ class Encoder(object):
             The Bloom filter bits, PRR, and IRR.  The first two values should never
             be sent over the network.
         """
-        bloom_bits = get_bloom_bits(word, self.cohort, self.params.num_hashes,
-                                self.params.num_bloombits)
+        bloom_bits = get_bloom_bits(word, self.cohort, self.params.num_hashes, self.params.num_bloombits)
 
         bloom = 0
         for bit_to_set in bloom_bits:
@@ -248,65 +256,4 @@ class Encoder(object):
         """
         _, _, irr = self._internal_encode(word)
         return irr
-
-
-# def signal():
-#     """
-#     Hash client's value v onto the Bloom filter B of size k using h hash functions.
-#
-#     Parameters
-#     ----------
-#
-#     Returns
-#     -------
-#
-#     """
-#     pass
-#
-#
-# def permanent_randomized_response():
-#     """
-#     For each client's value v and bit i in B, create a binary reporting value Bi' which equals to
-#     Bi' = 1 with probability  0.5f
-#     Bi' = 0 with probability  0.5f
-#     Bi' = Bi with probability  1 - f
-#
-#     Parameters
-#     ----------
-#
-#     Returns
-#     -------
-#
-#     """
-#     pass
-#
-#
-# def instantaneous_randomized_response():
-#     """
-#     Allocate a bit array S of size k and initialize to 0. Set each bit i in S with probabilities
-#     P(Si = q) = q if Bi' = 1
-#     P(Si = q) = p if Bi' = 0
-#
-#     Parameters
-#     ----------
-#
-#     Returns
-#     -------
-#
-#     """
-#     pass
-#
-#
-# def report():
-#     """
-#     Send the generated report S to the server.
-#
-#     Parameters
-#     ----------
-#
-#     Returns
-#     -------
-#
-#     """
-#     pass
 
