@@ -1,5 +1,12 @@
 RAPPOR ENCODER
+
 =================
+NOTE: ALL THE CODE in this section is based on Google's original code and documentation, it's only product of self-studying process and it will only serve that target alone.
+for more original information:
+http://www.chromium.org/developers/design-documents/rappor
+https://github.com/google/rappor
+Erlingsson Ú, Pihur V, Korolova A. Rappor: Randomized aggregatable privacy-preserving ordinal response[C]//Proceedings of the 2014 ACM SIGSAC conference on computer and communications security. 2014: 1054-1067.
+
 ### 1. Generating Random Bits for RAPPOR
 https://github.com/google/rappor/blob/master/doc/randomness.md
 ```
@@ -55,7 +62,4 @@ Generating random numbers is highly platform-specific -- even language-specific.
 ### 2. Core mechanism
 #### 2.1  Encode a integer with RAPPOR
 2.1.1 Signal
-Hash client's value v onto the Bloom lter B of size k using h hash functions.
-
-
-
+Hash client's value v onto the Bloom filter B of size k using h hash functions.
