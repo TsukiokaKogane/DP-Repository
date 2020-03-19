@@ -81,7 +81,7 @@ def to_big_endian(i):
     return struct.pack('>L', i)
 
 
-def bit_string(irr, num_bloombits):
+def _bit_string(irr, num_bloombits):
     """
     Like bin(), but uses leading zeroes, and no '0b'.
     """
