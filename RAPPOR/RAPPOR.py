@@ -64,7 +64,6 @@ class SecureIrrRand(object):
         Parameters
         params: rappor.Params
         """
-        # TODO: fix annotation
         num_bits = params.num_bloombits
         # IRR probabilities
         self.p_gen = _SecureRandom(params.prob_p, num_bits)
@@ -101,7 +100,6 @@ def get_bloom_bits(word, cohort, num_hashes, num_bloombits):
     In the real report, we bitwise-OR them together.  In hash candidates, we put
     them in separate entries in the "map" matrix.
     """
-    # TODO: fix annotation
     value = to_big_endian(cohort) + word  # Cohort is 4 byte prefix.
     md5 = hashlib.md5(value)
 
@@ -117,7 +115,6 @@ def get_bloom_bits(word, cohort, num_hashes, num_bloombits):
     # log('Cohort %d', cohort)
     # log('MD5 %s', md5.hexdigest())
 
-    # TODO: utility test
     return [digest[i] % num_bloombits for i in range(num_hashes)]
 
 
