@@ -80,7 +80,7 @@ def to_big_endian(i):
     return struct.pack('>L', i)
 
 
-def _bit_string(irr, num_bloombits):
+def bit_string(irr, num_bloombits):
     """
     Like bin(), but uses leading zeroes, and no '0b'.
     """
@@ -119,9 +119,9 @@ def get_bloom_bits(word, cohort, num_hashes, num_bloombits):
 
 
 def get_prr_masks(secret, word, prob_f, num_bits):
-    h = hmac.new(secret.encode(), word, digestmod=hashlib.sha256)
-    log('secret %s', secret.encode())
-    log('word %s, secret %s, HMAC-SHA256 %s', word, secret, h.hexdigest())
+    h = hmac.new(secret, word, digestmod=hashlib.sha256)
+    # log('secret %s', secret.encode())
+    # log('word %s, secret %s, HMAC-SHA256 %s', word, secret, h.hexdigest())
 
     # Now go through each byte
     digest_bytes = h.digest()
@@ -130,7 +130,7 @@ def get_prr_masks(secret, word, prob_f, num_bits):
     # Use 32 bits.  If we want 64 bits, it may be fine to generate another 32
     # bytes by repeated HMAC.  For arbitrary numbers of bytes it's probably
     # better to use the HMAC-DRBG algorithm.
-    log('num_bits %d max of %d',  num_bits, len(digest_bytes))
+    # log('num_bits %d max of %d',  num_bits, len(digest_bytes))
     if num_bits > len(digest_bytes):
         raise RuntimeError('%d bits is more than the max of %d', num_bits, len(digest_bytes))
 
@@ -141,7 +141,7 @@ def get_prr_masks(secret, word, prob_f, num_bits):
 
     for i in range(num_bits):
         byte = digest_bytes[i]
-        log('%d byte %d', i, byte)
+        # log('%d byte %d', i, byte)
 
         u_bit = byte & 0x01  # 1 bit of entropy
         uniform |= (u_bit << i)  # maybe set bit in mask
@@ -149,7 +149,7 @@ def get_prr_masks(secret, word, prob_f, num_bits):
         rand128 = byte >> 1  # 7 bits of entropy
         noise_bit = (rand128 < threshold128)
         f_mask |= (noise_bit << i)  # maybe set bit in mask
-    log('uniform %s, f_mask  %s', uniform, f_mask)
+    # log('uniform %s, f_mask  %s', uniform, f_mask)
     return uniform, f_mask
 
 
@@ -228,8 +228,10 @@ class Encoder(object):
         bloom = 0
         for bit_to_set in bloom_bits:
             bloom |= (1 << bit_to_set)
-
+        # log('bloom %s', bit_string(bloom, self.params.num_bloombits))
         prr, irr = self._internal_encode_bits(bloom)
+        # log('prr %s', bit_string(prr, self.params.num_bloombits))
+        # log('irr %s', bit_string(irr, self.params.num_bloombits))
         return bloom, prr, irr
 
     def encode_bits(self, bits):
